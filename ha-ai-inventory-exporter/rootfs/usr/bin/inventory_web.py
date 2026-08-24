@@ -104,22 +104,37 @@ class Handler(BaseHTTPRequestHandler):
                 status = {"ok": False, "error": f"Could not read status: {exc}"}
 
         stat_rows = "".join(
-            f"<div><strong>{html.escape(str(k))}</strong><span>{html.escape(str(v))}</span></div>"
+            f"<div class=\"stat\"><span>{html.escape(str(k).replace('_', ' ').title())}</span><strong>{html.escape(str(v))}</strong></div>"
             for k, v in stats.items()
         )
         if status is None:
-            status_html = "<p>No export status yet. Click <strong>Generate now</strong>.</p>"
+            status_html = (
+                "<div class=\"status-row\">"
+                "<span class=\"status-dot idle\"></span>"
+                "<div><strong>Waiting for first export</strong><p>Click Generate now to create the inventory JSON.</p></div>"
+                "</div>"
+            )
         elif status.get("ok"):
             warning = status.get("warning") or ""
             status_html = (
-                "<p><strong>Status:</strong> OK</p>"
-                f"<p><strong>Mode:</strong> {html.escape(str(status.get('mode', 'unknown')))}</p>"
-                f"<p><strong>Warning:</strong> {html.escape(str(warning or 'None'))}</p>"
+                "<div class=\"status-row\">"
+                "<span class=\"status-dot ok\"></span>"
+                "<div>"
+                "<strong>Export ready</strong>"
+                f"<p>Mode: {html.escape(str(status.get('mode', 'unknown')))}</p>"
+                f"<p>{html.escape(str(warning or 'No warnings'))}</p>"
+                "</div>"
+                "</div>"
             )
         else:
             status_html = (
-                "<p><strong>Status:</strong> Failed</p>"
+                "<div class=\"status-row\">"
+                "<span class=\"status-dot failed\"></span>"
+                "<div><strong>Export failed</strong><p>Open the details below or check the add-on log.</p></div>"
+                "</div>"
+                "<details><summary>Error details</summary>"
                 f"<pre>{html.escape(json.dumps(status, indent=2)[-4000:])}</pre>"
+                "</details>"
             )
 
         body = f"""<!doctype html>
@@ -132,48 +147,164 @@ class Handler(BaseHTTPRequestHandler):
     :root {{
       color-scheme: light dark;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --ai-primary: var(--primary-color, #03a9f4);
+      --ai-card: var(--card-background-color, #fff);
+      --ai-background: var(--primary-background-color, #fafafa);
+      --ai-text: var(--primary-text-color, #212121);
+      --ai-secondary: var(--secondary-text-color, #727272);
+      --ai-divider: var(--divider-color, rgba(0, 0, 0, .12));
+      --ai-radius: var(--ha-card-border-radius, 12px);
+      --ai-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, .16));
     }}
-    body {{ margin: 0; padding: 24px; background: var(--primary-background-color, #101418); color: var(--primary-text-color, #f4f7fb); }}
-    main {{ max-width: 860px; margin: 0 auto; display: grid; gap: 16px; }}
-    .hero {{ display: grid; gap: 8px; }}
-    h1 {{ margin: 0; font-size: 28px; }}
-    p {{ margin: 0; color: var(--secondary-text-color, #aab4c0); line-height: 1.5; }}
-    .card {{ border: 1px solid rgba(140, 150, 170, .28); border-radius: 8px; padding: 16px; background: rgba(255,255,255,.04); }}
-    .actions {{ display: flex; gap: 10px; flex-wrap: wrap; }}
-    a.button {{ text-decoration: none; color: white; background: #2563eb; border-radius: 6px; padding: 10px 14px; font-weight: 650; }}
-    a.secondary {{ background: rgba(148,163,184,.18); }}
-    code {{ overflow-wrap: anywhere; }}
-    .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }}
-    .stats div {{ border: 1px solid rgba(140, 150, 170, .2); border-radius: 6px; padding: 10px; display: grid; gap: 3px; }}
-    .stats span {{ color: var(--secondary-text-color, #aab4c0); }}
-    pre {{ white-space: pre-wrap; overflow-wrap: anywhere; color: #fecaca; }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      padding: 16px;
+      background: var(--ai-background);
+      color: var(--ai-text);
+      font-size: 14px;
+    }}
+    main {{
+      max-width: 980px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }}
+    .hero {{
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 4px 2px;
+    }}
+    .hero-icon {{
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--ai-primary) 16%, transparent);
+      color: var(--ai-primary);
+      font-size: 26px;
+    }}
+    h1, h2 {{ margin: 0; font-weight: 500; letter-spacing: 0; }}
+    h1 {{ font-size: 24px; line-height: 1.2; }}
+    h2 {{ font-size: 20px; line-height: 1.3; padding-bottom: 4px; }}
+    p {{ margin: 0; color: var(--ai-secondary); line-height: 1.45; }}
+    .layout {{ display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 16px; }}
+    .stack {{ display: grid; gap: 16px; }}
+    .card {{
+      border: 1px solid var(--ai-divider);
+      border-radius: var(--ai-radius);
+      padding: 16px;
+      background: var(--ai-card);
+      box-shadow: var(--ai-shadow);
+      display: grid;
+      gap: 12px;
+    }}
+    .meta {{ display: grid; gap: 10px; }}
+    .meta-row {{ display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; align-items: start; }}
+    .meta-row span {{ color: var(--ai-secondary); }}
+    .actions {{ display: grid; gap: 8px; }}
+    a.button {{
+      min-height: 44px;
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-primary-color, #fff);
+      background: var(--ai-primary);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-weight: 500;
+    }}
+    a.secondary {{
+      color: var(--ai-text);
+      background: color-mix(in srgb, var(--ai-primary) 10%, var(--ai-card));
+      border: 1px solid var(--ai-divider);
+    }}
+    code {{
+      overflow-wrap: anywhere;
+      color: var(--ai-text);
+      background: color-mix(in srgb, var(--ai-secondary) 10%, transparent);
+      border-radius: 6px;
+      padding: 2px 5px;
+    }}
+    .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }}
+    .stat {{
+      border: 1px solid var(--ai-divider);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      gap: 4px;
+      background: color-mix(in srgb, var(--ai-primary) 4%, var(--ai-card));
+    }}
+    .stat span {{ color: var(--ai-secondary); font-size: 12px; }}
+    .stat strong {{ font-size: 20px; font-weight: 500; }}
+    .status-row {{ display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 12px; align-items: start; }}
+    .status-row strong {{ font-weight: 500; }}
+    .status-dot {{ width: 12px; height: 12px; border-radius: 50%; margin-top: 4px; }}
+    .status-dot.ok {{ background: var(--success-color, #43a047); }}
+    .status-dot.failed {{ background: var(--error-color, #db4437); }}
+    .status-dot.idle {{ background: var(--warning-color, #ffa600); }}
+    details {{ border-top: 1px solid var(--ai-divider); padding-top: 10px; }}
+    summary {{ cursor: pointer; color: var(--ai-primary); }}
+    pre {{
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: var(--error-color, #db4437);
+      background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
+      border-radius: 8px;
+      padding: 12px;
+    }}
+    @media (max-width: 760px) {{
+      body {{ padding: 12px; }}
+      .layout {{ grid-template-columns: 1fr; }}
+      .meta-row {{ grid-template-columns: 1fr; gap: 3px; }}
+    }}
   </style>
 </head>
 <body>
   <main>
     <section class="hero">
-      <h1>AI Inventory</h1>
-      <p>Automatic Home Assistant inventory export for AI-assisted automations, dashboards, and reviews.</p>
+      <div class="hero-icon">⌂</div>
+      <div>
+        <h1>AI Inventory</h1>
+        <p>Automatic Home Assistant inventory export for automations, dashboards, and reviews.</p>
+      </div>
     </section>
-    <section class="card">
-      <p><strong>Last generated:</strong> {html.escape(generated_at)}</p>
-      <p><strong>Size:</strong> {html.escape(size)}</p>
-      <p><strong>Output:</strong> <code>{html.escape(str(self.output_path))}</code></p>
-      <p><strong>Public URL:</strong> <code>{html.escape(public_path)}</code></p>
-    </section>
-    <section class="card">
-      <h2>Export status</h2>
-      {status_html}
-    </section>
-    <section class="actions">
-      <a class="button" href="./refresh">Generate now</a>
-      <a class="button secondary" href="./download">Download JSON</a>
-      <a class="button secondary" href="{html.escape(public_path)}">Open public JSON</a>
-    </section>
-    <section class="card">
-      <h2>Statistics</h2>
-      <div class="stats">{stat_rows or "<p>No statistics yet.</p>"}</div>
-    </section>
+    <div class="layout">
+      <div class="stack">
+        <section class="card">
+          <h2>Export status</h2>
+          {status_html}
+        </section>
+        <section class="card">
+          <h2>Statistics</h2>
+          <div class="stats">{stat_rows or "<p>No statistics yet.</p>"}</div>
+        </section>
+      </div>
+      <div class="stack">
+        <section class="card">
+          <h2>Inventory file</h2>
+          <div class="meta">
+            <div class="meta-row"><span>Generated</span><strong>{html.escape(generated_at)}</strong></div>
+            <div class="meta-row"><span>Size</span><strong>{html.escape(size)}</strong></div>
+            <div class="meta-row"><span>Output</span><code>{html.escape(str(self.output_path))}</code></div>
+            <div class="meta-row"><span>Public URL</span><code>{html.escape(public_path)}</code></div>
+          </div>
+        </section>
+        <section class="card">
+          <h2>Actions</h2>
+          <div class="actions">
+            <a class="button" href="./refresh"><span>↻</span><span>Generate now</span></a>
+            <a class="button secondary" href="./download"><span>⇩</span><span>Download JSON</span></a>
+            <a class="button secondary" href="{html.escape(public_path)}"><span>↗</span><span>Open public JSON</span></a>
+          </div>
+        </section>
+      </div>
+    </div>
   </main>
 </body>
 </html>"""
