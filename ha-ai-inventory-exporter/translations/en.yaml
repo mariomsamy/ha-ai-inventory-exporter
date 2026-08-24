@@ -1,0 +1,10 @@
+configuration:
+  output_path:
+    name: Output path
+    description: Where to write the inventory JSON inside Home Assistant.
+  interval_minutes:
+    name: Interval minutes
+    description: How often to regenerate the inventory file.
+  run_once:
+    name: Run once
+    description: Export once and stop instead of running on a schedule.
