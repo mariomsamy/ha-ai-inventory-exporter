@@ -7,7 +7,7 @@ import subprocess
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -35,17 +35,32 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_json(self, payload, status: int = 200):
+        data = json.dumps(payload, indent=2).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/refresh":
-            self.refresh()
+        if parsed.path in ("/api/status", "/status"):
+            self.send_json(self.read_summary())
             return
-        if parsed.path == "/download":
+        if parsed.path in ("/api/generate", "/refresh"):
+            self.generate()
+            return
+        if parsed.path in ("/api/download", "/download"):
             self.download()
+            return
+        if parsed.path in ("/api/inventory", "/inventory"):
+            self.inventory()
             return
         self.index()
 
-    def refresh(self):
+    def generate(self):
         try:
             result = subprocess.run(
                 ["/usr/bin/export_inventory.py", "--output", str(self.output_path)],
@@ -67,11 +82,7 @@ class Handler(BaseHTTPRequestHandler):
             }
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         self.status_path.write_text(json.dumps(status, indent=2), encoding="utf-8")
-        qs = parse_qs(urlparse(self.path).query)
-        redirect = qs.get("next", ["/"])[0] or "/"
-        self.send_response(303)
-        self.send_header("Location", redirect)
-        self.end_headers()
+        self.send_json(self.read_summary())
 
     def download(self):
         if not self.output_path.exists():
@@ -88,12 +99,24 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def index(self):
+    def inventory(self):
+        if not self.output_path.exists():
+            self.send_json({"ok": False, "error": "Inventory has not been generated yet"}, 404)
+            return
+        try:
+            data = json.loads(self.output_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, 500)
+            return
+        self.send_json({"ok": True, "inventory": data})
+
+    def read_summary(self):
         generated_at = "Not generated yet"
         stats = {}
         size = "-"
         public_path = "/local/ai/home_assistant_full_inventory.json"
         status = None
+        preview = None
 
         if self.output_path.exists():
             size = f"{self.output_path.stat().st_size / 1024 / 1024:.1f} MB"
@@ -101,6 +124,15 @@ class Handler(BaseHTTPRequestHandler):
                 data = json.loads(self.output_path.read_text(encoding="utf-8"))
                 generated_at = data.get("metadata", {}).get("generated_at", generated_at)
                 stats = data.get("statistics", {})
+                preview = {
+                    "metadata": data.get("metadata", {}),
+                    "statistics": data.get("statistics", {}),
+                    "indexes": {
+                        key: value
+                        for key, value in data.get("indexes", {}).items()
+                        if key in ("entities_by_area", "entities_by_domain")
+                    },
+                }
             except Exception as exc:
                 generated_at = f"Could not read JSON: {exc}"
 
@@ -109,6 +141,25 @@ class Handler(BaseHTTPRequestHandler):
                 status = json.loads(self.status_path.read_text(encoding="utf-8"))
             except Exception as exc:
                 status = {"ok": False, "error": f"Could not read status: {exc}"}
+
+        return {
+            "ok": bool(status and status.get("ok")),
+            "generated_at": generated_at,
+            "size": size,
+            "stats": stats,
+            "status": status,
+            "output_path": self.display_output_path(self.output_path),
+            "public_path": public_path,
+            "preview": preview,
+        }
+
+    def index(self):
+        summary = self.read_summary()
+        generated_at = summary["generated_at"]
+        stats = summary["stats"]
+        size = summary["size"]
+        public_path = summary["public_path"]
+        status = summary["status"]
 
         stat_rows = "".join(
             f"<div class=\"stat\"><span>{html.escape(str(k).replace('_', ' ').title())}: </span><strong>{html.escape(str(v))}</strong></div>"
@@ -213,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
     .meta-row {{ display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; align-items: start; }}
     .meta-row span {{ color: var(--ai-secondary); }}
     .actions {{ display: grid; gap: 8px; }}
-    a.button {{
+    button, a.button {{
       min-height: 44px;
       display: grid;
       grid-template-columns: 24px minmax(0, 1fr);
@@ -225,12 +276,18 @@ class Handler(BaseHTTPRequestHandler):
       border-radius: 8px;
       padding: 10px 14px;
       font-weight: 500;
+      border: 0;
+      cursor: pointer;
+      width: 100%;
+      font: inherit;
+      text-align: left;
     }}
-    a.secondary {{
+    button.secondary, a.secondary {{
       color: var(--ai-text);
       background: color-mix(in srgb, var(--ai-primary) 10%, var(--ai-card));
       border: 1px solid var(--ai-divider);
     }}
+    button:disabled {{ opacity: .62; cursor: progress; }}
     code {{
       overflow-wrap: anywhere;
       color: var(--ai-text);
@@ -265,6 +322,17 @@ class Handler(BaseHTTPRequestHandler):
       border-radius: 8px;
       padding: 12px;
     }}
+    .preview {{
+      max-height: 360px;
+      overflow: auto;
+      color: var(--ai-text);
+      background: color-mix(in srgb, var(--ai-secondary) 8%, var(--ai-card));
+      border: 1px solid var(--ai-divider);
+    }}
+    .toast {{
+      min-height: 22px;
+      color: var(--ai-secondary);
+    }}
     @media (max-width: 760px) {{
       body {{ padding: 12px; }}
       .layout {{ grid-template-columns: 1fr; }}
@@ -285,34 +353,135 @@ class Handler(BaseHTTPRequestHandler):
       <div class="stack">
         <section class="card">
           <h2>Export status</h2>
-          {status_html}
+          <div id="status">{status_html}</div>
         </section>
         <section class="card">
           <h2>Statistics</h2>
-          <div class="stats">{stat_rows or "<p>No statistics yet.</p>"}</div>
+          <div class="stats" id="stats">{stat_rows or "<p>No statistics yet.</p>"}</div>
+        </section>
+        <section class="card">
+          <h2>JSON preview</h2>
+          <pre class="preview" id="preview">Loading preview...</pre>
         </section>
       </div>
       <div class="stack">
         <section class="card">
           <h2>Inventory file</h2>
           <div class="meta">
-            <div class="meta-row"><span>Generated: </span><strong>{html.escape(generated_at)}</strong></div>
-            <div class="meta-row"><span>Size: </span><strong>{html.escape(size)}</strong></div>
-            <div class="meta-row"><span>Output: </span><code>{html.escape(self.display_output_path(self.output_path))}</code></div>
-            <div class="meta-row"><span>Public URL: </span><code>{html.escape(public_path)}</code></div>
+            <div class="meta-row"><span>Generated: </span><strong id="generated-at">{html.escape(generated_at)}</strong></div>
+            <div class="meta-row"><span>Size: </span><strong id="size">{html.escape(size)}</strong></div>
+            <div class="meta-row"><span>Output: </span><code id="output-path">{html.escape(summary["output_path"])}</code></div>
+            <div class="meta-row"><span>Public URL: </span><code id="public-path">{html.escape(public_path)}</code></div>
           </div>
         </section>
         <section class="card">
           <h2>Actions</h2>
           <div class="actions">
-            <a class="button" href="./refresh"><span>↻</span><span>Generate now</span></a>
-            <a class="button secondary" href="./download"><span>⇩</span><span>Download JSON</span></a>
-            <a class="button secondary" href="{html.escape(public_path)}"><span>↗</span><span>Open public JSON</span></a>
+            <button class="button" id="generate" type="button"><span>↻</span><span>Generate now</span></button>
+            <button class="button secondary" id="download" type="button"><span>⇩</span><span>Download JSON</span></button>
+            <button class="button secondary" id="view-json" type="button"><span>{{}}</span><span>Show full JSON here</span></button>
           </div>
+          <p class="toast" id="toast"></p>
         </section>
       </div>
     </div>
   </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function esc(value) {{
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({{
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }}[char]));
+    }}
+
+    function statusHtml(status) {{
+      if (!status) {{
+        return '<div class="status-row"><span class="status-dot idle"></span><div><strong>Waiting for first export</strong><p>Click Generate now to create the inventory JSON.</p></div></div>';
+      }}
+      if (status.ok) {{
+        const warning = status.warning || "No warnings";
+        const mode = status.mode || "unknown";
+        return `<div class="status-row"><span class="status-dot ok"></span><div><strong>Export ready</strong><br><p>Mode: ${{esc(mode)}}</p><p>${{esc(warning)}}</p></div></div>`;
+      }}
+      return `<div class="status-row"><span class="status-dot failed"></span><div><strong>Export failed</strong><p>Check the details below or the add-on log.</p></div></div><details><summary>Error details</summary><pre>${{esc(JSON.stringify(status, null, 2).slice(-4000))}}</pre></details>`;
+    }}
+
+    function statsHtml(stats) {{
+      const entries = Object.entries(stats || {{}});
+      if (!entries.length) return "<p>No statistics yet.</p>";
+      return entries.map(([key, value]) => `<div class="stat"><span>${{esc(key.replaceAll("_", " ").replace(/\\b\\w/g, c => c.toUpperCase()))}}: </span><strong>${{esc(value)}}</strong></div>`).join("");
+    }}
+
+    function render(summary) {{
+      $("status").innerHTML = statusHtml(summary.status);
+      $("stats").innerHTML = statsHtml(summary.stats);
+      $("generated-at").textContent = summary.generated_at || "Not generated yet";
+      $("size").textContent = summary.size || "-";
+      $("output-path").textContent = summary.output_path || "";
+      $("public-path").textContent = summary.public_path || "";
+      $("preview").textContent = summary.preview ? JSON.stringify(summary.preview, null, 2) : "No JSON generated yet.";
+    }}
+
+    async function loadStatus() {{
+      const response = await fetch("./api/status", {{cache: "no-store"}});
+      render(await response.json());
+    }}
+
+    async function generate() {{
+      const button = $("generate");
+      button.disabled = true;
+      $("toast").textContent = "Generating inventory...";
+      try {{
+        const response = await fetch("./api/generate", {{cache: "no-store"}});
+        const summary = await response.json();
+        render(summary);
+        $("toast").textContent = summary.ok ? "Inventory generated." : "Generate failed. See status details.";
+      }} catch (error) {{
+        $("toast").textContent = `Generate failed: ${{error}}`;
+      }} finally {{
+        button.disabled = false;
+      }}
+    }}
+
+    async function showFullJson() {{
+      $("toast").textContent = "Loading full JSON inside this page...";
+      const response = await fetch("./api/inventory", {{cache: "no-store"}});
+      const payload = await response.json();
+      $("preview").textContent = JSON.stringify(payload.inventory || payload, null, 2);
+      $("toast").textContent = response.ok ? "Full JSON loaded below." : "Could not load JSON.";
+    }}
+
+    async function downloadJson() {{
+      $("toast").textContent = "Preparing download...";
+      const response = await fetch("./api/download", {{cache: "no-store"}});
+      if (!response.ok) {{
+        $("toast").textContent = "Inventory is not ready yet.";
+        return;
+      }}
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "home_assistant_full_inventory.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      $("toast").textContent = "Download started.";
+    }}
+
+    $("generate").addEventListener("click", generate);
+    $("download").addEventListener("click", downloadJson);
+    $("view-json").addEventListener("click", showFullJson);
+    loadStatus().catch((error) => {{
+      $("toast").textContent = `Could not load status: ${{error}}`;
+    }});
+  </script>
 </body>
 </html>"""
         self.send_html(body)

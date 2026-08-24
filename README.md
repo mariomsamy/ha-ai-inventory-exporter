@@ -21,7 +21,7 @@ Main features:
 - Uses Home Assistant's internal add-on API token.
 - Does not require a user-created long-lived access token.
 - Provides a sidebar UI called **AI Inventory**.
-- Lets you generate, download, and open the JSON from Home Assistant.
+- Lets you generate, preview, and download the JSON inside the Home Assistant sidebar page.
 - Exports entities, devices, areas, services, states, Lovelace panels, config entries, and enriched indexes.
 
 ## Add This Repository To Home Assistant
@@ -46,7 +46,8 @@ After installing and starting the add-on:
 1. Enable **Show in sidebar**.
 2. Open **AI Inventory** from the sidebar.
 3. Click **Generate now**.
-4. Use the generated JSON at:
+4. Preview the JSON on the same page or download it.
+5. Use the generated JSON at:
 
    ```text
    /local/ai/home_assistant_full_inventory.json

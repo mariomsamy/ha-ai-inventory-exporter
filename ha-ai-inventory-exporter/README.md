@@ -13,7 +13,7 @@ It is designed for workflows where an AI assistant needs to understand your enti
 - Generates an enriched entity inventory with area, device, platform, state, and attribute context.
 - Indexes entities by area, domain, platform, MQTT, ESPHome, and device.
 - Includes a Home Assistant sidebar page called **AI Inventory**.
-- Provides buttons to generate the file now, download JSON, and open the public JSON path.
+- Provides buttons to generate, preview, and download JSON inside the sidebar page.
 - Runs on a schedule, every 60 minutes by default.
 - Can also run once and stop.
 - Writes the file atomically to avoid half-written JSON.
@@ -79,9 +79,9 @@ From the sidebar page you can:
 - See the output path.
 - See the public JSON URL.
 - View inventory statistics.
-- Generate a fresh export immediately.
-- Download the JSON file.
-- Open the public JSON path.
+- Generate a fresh export immediately without leaving the page.
+- Preview the JSON inside the page.
+- Download the JSON file without redirecting away from the add-on.
 
 ## Install From This GitHub Repository
 
@@ -165,13 +165,14 @@ Use this if you prefer manual exports only.
 1. Install and start the add-on.
 2. Open **AI Inventory** in the sidebar.
 3. Click **Generate now**.
-4. Share the JSON URL or file with your AI tool:
+4. Click **Show full JSON here** to inspect it in the sidebar, or download the file.
+5. Share the JSON URL or file with your AI tool:
 
    ```text
    /local/ai/home_assistant_full_inventory.json
    ```
 
-5. Ask the AI to inspect the inventory before creating automations or dashboard changes.
+6. Ask the AI to inspect the inventory before creating automations or dashboard changes.
 
 Example prompts:
 
@@ -217,6 +218,26 @@ SUPERVISOR_TOKEN
 ```
 
 This token is provided by Home Assistant to add-ons when `homeassistant_api` is enabled.
+
+## Add-on Build Lessons
+
+This add-on follows the HAOS patterns that matter most for reliable future add-ons:
+
+- Use an explicit base image in `Dockerfile`, such as `ghcr.io/home-assistant/base:latest`.
+- Do not depend on Supervisor injecting `BUILD_FROM`.
+- Use `homeassistant_api: true` and the provided `SUPERVISOR_TOKEN` instead of asking users for long-lived tokens.
+- Mount Home Assistant config explicitly with object syntax:
+
+  ```yaml
+  map:
+    - type: homeassistant_config
+      read_only: false
+      path: /config
+  ```
+
+- Write public files under `/config/www/...`; Home Assistant serves them as `/local/...`.
+- Keep the sidebar page self-contained through ingress APIs so actions do not redirect users away from the add-on.
+- Return machine-readable JSON from action endpoints and let the page update status, preview, and errors in place.
 
 The token is used only inside the add-on container and is never written to the exported JSON.
 
