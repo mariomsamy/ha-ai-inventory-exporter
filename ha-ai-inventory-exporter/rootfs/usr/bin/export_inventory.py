@@ -3,7 +3,6 @@
 import argparse
 import json
 import os
-import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +30,6 @@ def connect_ws(token: str):
     ws = websocket.create_connection(
         CORE_WS,
         timeout=30,
-        header=[f"Authorization: Bearer {token}"],
     )
 
     msg = receive_json(ws)
@@ -91,38 +89,67 @@ def fetch_rest(token: str, path: str):
 
 
 def build_inventory(token: str):
-    ws = connect_ws(token)
+    mode = "websocket"
+    warning = None
+
     try:
-        config = safe_call(ws, "get_config")
-        states = safe_call(ws, "get_states")
-        services = safe_call(ws, "get_services")
-        panels = safe_call(ws, "get_panels")
+        ws = connect_ws(token)
+        try:
+            config = safe_call(ws, "get_config")
+            states = safe_call(ws, "get_states")
+            services = safe_call(ws, "get_services")
+            panels = safe_call(ws, "get_panels")
 
+            registries = {
+                "devices": safe_call(ws, "config/device_registry/list"),
+                "entities": safe_call(ws, "config/entity_registry/list"),
+                "areas": safe_call(ws, "config/area_registry/list"),
+                "floors": safe_call(ws, "config/floor_registry/list"),
+                "labels": safe_call(ws, "config/label_registry/list"),
+            }
+
+            system = {
+                "config_entries": safe_call(ws, "config_entries/get"),
+                "entity_display_registry": safe_call(
+                    ws,
+                    "config/entity_registry/list_for_display",
+                ),
+                "exposed_entities": safe_call(ws, "homeassistant/expose_entity/list"),
+            }
+        finally:
+            ws.close()
+    except Exception as exc:
+        mode = "rest_fallback"
+        warning = f"WebSocket export failed, used REST fallback: {exc}"
+        config = wrap_rest(lambda: fetch_rest(token, "/config"))
+        states = wrap_rest(lambda: fetch_rest(token, "/states"))
+        services = wrap_rest(lambda: fetch_rest(token, "/services"))
+        panels = {
+            "success": False,
+            "error": "Not available in REST fallback",
+            "data": None,
+        }
         registries = {
-            "devices": safe_call(ws, "config/device_registry/list"),
-            "entities": safe_call(ws, "config/entity_registry/list"),
-            "areas": safe_call(ws, "config/area_registry/list"),
-            "floors": safe_call(ws, "config/floor_registry/list"),
-            "labels": safe_call(ws, "config/label_registry/list"),
+            "devices": empty_result("Not available in REST fallback"),
+            "entities": states_to_entity_registry(states.get("data") or []),
+            "areas": empty_result("Not available in REST fallback"),
+            "floors": empty_result("Not available in REST fallback"),
+            "labels": empty_result("Not available in REST fallback"),
         }
-
         system = {
-            "config_entries": safe_call(ws, "config_entries/get"),
-            "entity_display_registry": safe_call(
-                ws,
-                "config/entity_registry/list_for_display",
-            ),
-            "exposed_entities": safe_call(ws, "homeassistant/expose_entity/list"),
+            "config_entries": empty_result("Not available in REST fallback"),
+            "entity_display_registry": empty_result("Not available in REST fallback"),
+            "exposed_entities": empty_result("Not available in REST fallback"),
         }
-    finally:
-        ws.close()
 
     inventory = {
         "metadata": {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "exporter": "AI Inventory Exporter add-on",
-            "exporter_version": "1.0.0",
+            "exporter_version": "1.0.2",
             "core_api": CORE_API,
+            "mode": mode,
+            "warning": warning,
         },
         "home_assistant": {
             "config": config,
@@ -140,6 +167,44 @@ def build_inventory(token: str):
 
     enrich_inventory(inventory)
     return inventory
+
+
+def wrap_rest(callback):
+    try:
+        return {"success": True, "data": callback()}
+    except Exception as exc:
+        return {"success": False, "error": str(exc), "data": None}
+
+
+def empty_result(error):
+    return {"success": False, "error": error, "data": []}
+
+
+def states_to_entity_registry(states):
+    entities = []
+    for state in states:
+        entity_id = state.get("entity_id")
+        if not entity_id:
+            continue
+        attributes = state.get("attributes", {})
+        entities.append(
+            {
+                "entity_id": entity_id,
+                "name": attributes.get("friendly_name"),
+                "original_name": attributes.get("friendly_name"),
+                "platform": None,
+                "device_id": None,
+                "area_id": None,
+                "disabled_by": None,
+                "hidden_by": None,
+                "entity_category": attributes.get("entity_category"),
+                "device_class": attributes.get("device_class"),
+                "original_device_class": attributes.get("device_class"),
+                "unique_id": None,
+                "config_entry_id": None,
+            }
+        )
+    return {"success": True, "data": entities}
 
 
 def enrich_inventory(inventory):
@@ -265,10 +330,21 @@ def main():
     args = parser.parse_args()
 
     token = get_token()
-    inventory = build_inventory(token)
-
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
+    status_path = output.parent / "export_status.json"
+
+    try:
+        inventory = build_inventory(token)
+    except Exception as exc:
+        status = {
+            "ok": False,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "output": str(output),
+            "error": str(exc),
+        }
+        status_path.write_text(json.dumps(status, indent=2), encoding="utf-8")
+        raise
 
     tmp = output.with_suffix(output.suffix + ".tmp")
     tmp.write_text(
@@ -282,6 +358,16 @@ def main():
         f"{datetime.now(timezone.utc).isoformat()} {output}\n",
         encoding="utf-8",
     )
+
+    status = {
+        "ok": True,
+        "generated_at": inventory["metadata"]["generated_at"],
+        "output": str(output),
+        "mode": inventory["metadata"].get("mode"),
+        "warning": inventory["metadata"].get("warning"),
+        "statistics": inventory["statistics"],
+    }
+    status_path.write_text(json.dumps(status, indent=2), encoding="utf-8")
 
     print(
         json.dumps(

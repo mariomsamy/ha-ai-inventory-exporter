@@ -13,6 +13,10 @@ from urllib.parse import parse_qs, urlparse
 class Handler(BaseHTTPRequestHandler):
     output_path: Path
 
+    @property
+    def status_path(self):
+        return self.output_path.parent / "export_status.json"
+
     def log_message(self, fmt, *args):
         return
 
@@ -35,16 +39,30 @@ class Handler(BaseHTTPRequestHandler):
         self.index()
 
     def refresh(self):
-        result = subprocess.run(
-            ["/usr/bin/export_inventory.py", "--output", str(self.output_path)],
-            text=True,
-            capture_output=True,
-            timeout=120,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                ["/usr/bin/export_inventory.py", "--output", str(self.output_path)],
+                text=True,
+                capture_output=True,
+                timeout=180,
+                check=False,
+            )
+            status = {
+                "ok": result.returncode == 0,
+                "returncode": result.returncode,
+                "stdout": result.stdout[-4000:],
+                "stderr": result.stderr[-4000:],
+            }
+        except Exception as exc:
+            status = {
+                "ok": False,
+                "error": str(exc),
+            }
+        self.status_path.parent.mkdir(parents=True, exist_ok=True)
+        self.status_path.write_text(json.dumps(status, indent=2), encoding="utf-8")
         qs = parse_qs(urlparse(self.path).query)
         redirect = qs.get("next", ["/"])[0] or "/"
-        self.send_response(303 if result.returncode == 0 else 302)
+        self.send_response(303)
         self.send_header("Location", redirect)
         self.end_headers()
 
@@ -68,6 +86,7 @@ class Handler(BaseHTTPRequestHandler):
         stats = {}
         size = "-"
         public_path = "/local/ai/home_assistant_full_inventory.json"
+        status = None
 
         if self.output_path.exists():
             size = f"{self.output_path.stat().st_size / 1024 / 1024:.1f} MB"
@@ -78,10 +97,30 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 generated_at = f"Could not read JSON: {exc}"
 
+        if self.status_path.exists():
+            try:
+                status = json.loads(self.status_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                status = {"ok": False, "error": f"Could not read status: {exc}"}
+
         stat_rows = "".join(
             f"<div><strong>{html.escape(str(k))}</strong><span>{html.escape(str(v))}</span></div>"
             for k, v in stats.items()
         )
+        if status is None:
+            status_html = "<p>No export status yet. Click <strong>Generate now</strong>.</p>"
+        elif status.get("ok"):
+            warning = status.get("warning") or ""
+            status_html = (
+                "<p><strong>Status:</strong> OK</p>"
+                f"<p><strong>Mode:</strong> {html.escape(str(status.get('mode', 'unknown')))}</p>"
+                f"<p><strong>Warning:</strong> {html.escape(str(warning or 'None'))}</p>"
+            )
+        else:
+            status_html = (
+                "<p><strong>Status:</strong> Failed</p>"
+                f"<pre>{html.escape(json.dumps(status, indent=2)[-4000:])}</pre>"
+            )
 
         body = f"""<!doctype html>
 <html>
@@ -107,6 +146,7 @@ class Handler(BaseHTTPRequestHandler):
     .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }}
     .stats div {{ border: 1px solid rgba(140, 150, 170, .2); border-radius: 6px; padding: 10px; display: grid; gap: 3px; }}
     .stats span {{ color: var(--secondary-text-color, #aab4c0); }}
+    pre {{ white-space: pre-wrap; overflow-wrap: anywhere; color: #fecaca; }}
   </style>
 </head>
 <body>
@@ -120,6 +160,10 @@ class Handler(BaseHTTPRequestHandler):
       <p><strong>Size:</strong> {html.escape(size)}</p>
       <p><strong>Output:</strong> <code>{html.escape(str(self.output_path))}</code></p>
       <p><strong>Public URL:</strong> <code>{html.escape(public_path)}</code></p>
+    </section>
+    <section class="card">
+      <h2>Export status</h2>
+      {status_html}
     </section>
     <section class="actions">
       <a class="button" href="./refresh">Generate now</a>
