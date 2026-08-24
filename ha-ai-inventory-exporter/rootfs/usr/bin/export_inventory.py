@@ -15,6 +15,13 @@ CORE_API = "http://supervisor/core/api"
 CORE_WS = "ws://supervisor/core/websocket"
 
 
+def resolve_output_path(path: str) -> Path:
+    if path.startswith("/homeassistant/") and not Path("/homeassistant").is_dir():
+        if Path("/config").is_dir():
+            return Path("/config") / path.removeprefix("/homeassistant/")
+    return Path(path)
+
+
 def get_token() -> str:
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
@@ -146,7 +153,7 @@ def build_inventory(token: str):
         "metadata": {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "exporter": "AI Inventory Exporter add-on",
-            "exporter_version": "1.0.2",
+            "exporter_version": "1.0.4",
             "core_api": CORE_API,
             "mode": mode,
             "warning": warning,
@@ -330,7 +337,7 @@ def main():
     args = parser.parse_args()
 
     token = get_token()
-    output = Path(args.output)
+    output = resolve_output_path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     status_path = output.parent / "export_status.json"
 

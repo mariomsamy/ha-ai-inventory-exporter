@@ -20,6 +20,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
+    @staticmethod
+    def display_output_path(path: Path) -> str:
+        text = str(path)
+        if text.startswith("/homeassistant/"):
+            return "/config/" + text.removeprefix("/homeassistant/")
+        return text
+
     def send_html(self, body: str, status: int = 200):
         data = body.encode("utf-8")
         self.send_response(status)
@@ -104,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
                 status = {"ok": False, "error": f"Could not read status: {exc}"}
 
         stat_rows = "".join(
-            f"<div class=\"stat\"><span>{html.escape(str(k).replace('_', ' ').title())}</span><strong>{html.escape(str(v))}</strong></div>"
+            f"<div class=\"stat\"><span>{html.escape(str(k).replace('_', ' ').title())}: </span><strong>{html.escape(str(v))}</strong></div>"
             for k, v in stats.items()
         )
         if status is None:
@@ -120,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
                 "<div class=\"status-row\">"
                 "<span class=\"status-dot ok\"></span>"
                 "<div>"
-                "<strong>Export ready</strong>"
+                "<strong>Export ready</strong><br>"
                 f"<p>Mode: {html.escape(str(status.get('mode', 'unknown')))}</p>"
                 f"<p>{html.escape(str(warning or 'No warnings'))}</p>"
                 "</div>"
@@ -289,10 +296,10 @@ class Handler(BaseHTTPRequestHandler):
         <section class="card">
           <h2>Inventory file</h2>
           <div class="meta">
-            <div class="meta-row"><span>Generated</span><strong>{html.escape(generated_at)}</strong></div>
-            <div class="meta-row"><span>Size</span><strong>{html.escape(size)}</strong></div>
-            <div class="meta-row"><span>Output</span><code>{html.escape(str(self.output_path))}</code></div>
-            <div class="meta-row"><span>Public URL</span><code>{html.escape(public_path)}</code></div>
+            <div class="meta-row"><span>Generated: </span><strong>{html.escape(generated_at)}</strong></div>
+            <div class="meta-row"><span>Size: </span><strong>{html.escape(size)}</strong></div>
+            <div class="meta-row"><span>Output: </span><code>{html.escape(self.display_output_path(self.output_path))}</code></div>
+            <div class="meta-row"><span>Public URL: </span><code>{html.escape(public_path)}</code></div>
           </div>
         </section>
         <section class="card">

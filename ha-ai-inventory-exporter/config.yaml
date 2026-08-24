@@ -1,6 +1,6 @@
 name: "AI Inventory Exporter"
 description: "Exports a full Home Assistant inventory JSON for AI-assisted automations and dashboards."
-version: "1.0.3"
+version: "1.0.4"
 slug: "ai_inventory_exporter"
 init: false
 arch:
@@ -18,7 +18,9 @@ ingress_port: 8099
 panel_icon: mdi:robot
 panel_title: AI Inventory
 map:
-  - homeassistant_config:rw
+  - type: homeassistant_config
+    read_only: false
+    path: /config
 options:
   output_path: "/config/www/ai/home_assistant_full_inventory.json"
   interval_minutes: 60
