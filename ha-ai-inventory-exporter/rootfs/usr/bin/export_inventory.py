@@ -153,7 +153,7 @@ def build_inventory(token: str):
         "metadata": {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "exporter": "AI Inventory Exporter add-on",
-            "exporter_version": "1.0.5",
+            "exporter_version": "1.0.6",
             "core_api": CORE_API,
             "mode": mode,
             "warning": warning,

@@ -206,13 +206,23 @@ class Handler(BaseHTTPRequestHandler):
       color-scheme: light dark;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       --ai-primary: var(--primary-color, #03a9f4);
-      --ai-card: var(--card-background-color, #fff);
+      --ai-card: var(--card-background-color, #ffffff);
       --ai-background: var(--primary-background-color, #fafafa);
       --ai-text: var(--primary-text-color, #212121);
       --ai-secondary: var(--secondary-text-color, #727272);
       --ai-divider: var(--divider-color, rgba(0, 0, 0, .12));
       --ai-radius: var(--ha-card-border-radius, 12px);
       --ai-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, .16));
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        --ai-card: var(--card-background-color, #1c1c1c);
+        --ai-background: var(--primary-background-color, #111111);
+        --ai-text: var(--primary-text-color, #e1e1e1);
+        --ai-secondary: var(--secondary-text-color, #9b9b9b);
+        --ai-divider: var(--divider-color, rgba(255, 255, 255, .12));
+        --ai-shadow: var(--ha-card-box-shadow, none);
+      }}
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -388,6 +398,41 @@ class Handler(BaseHTTPRequestHandler):
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
+    const themeVars = [
+      "--primary-color",
+      "--card-background-color",
+      "--primary-background-color",
+      "--primary-text-color",
+      "--secondary-text-color",
+      "--divider-color",
+      "--ha-card-border-radius",
+      "--ha-card-box-shadow",
+      "--success-color",
+      "--error-color",
+      "--warning-color",
+      "--text-primary-color"
+    ];
+
+    function syncHomeAssistantTheme() {{
+      try {{
+        const sources = [
+          window.parent?.document?.querySelector("home-assistant"),
+          window.parent?.document?.documentElement,
+          window.parent?.document?.body
+        ].filter(Boolean);
+        for (const source of sources) {{
+          const styles = window.parent.getComputedStyle(source);
+          for (const name of themeVars) {{
+            const value = styles.getPropertyValue(name).trim();
+            if (value) document.documentElement.style.setProperty(name, value);
+          }}
+        }}
+        const parentColorScheme = window.parent.getComputedStyle(window.parent.document.documentElement).colorScheme;
+        if (parentColorScheme) document.documentElement.style.colorScheme = parentColorScheme;
+      }} catch (error) {{
+        document.documentElement.dataset.themeSync = "unavailable";
+      }}
+    }}
 
     function esc(value) {{
       return String(value ?? "").replace(/[&<>"']/g, (char) => ({{
@@ -478,6 +523,7 @@ class Handler(BaseHTTPRequestHandler):
     $("generate").addEventListener("click", generate);
     $("download").addEventListener("click", downloadJson);
     $("view-json").addEventListener("click", showFullJson);
+    syncHomeAssistantTheme();
     loadStatus().catch((error) => {{
       $("toast").textContent = `Could not load status: ${{error}}`;
     }});

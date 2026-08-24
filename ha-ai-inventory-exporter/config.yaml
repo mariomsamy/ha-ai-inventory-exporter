@@ -1,6 +1,6 @@
 name: "AI Inventory Exporter"
 description: "Exports a full Home Assistant inventory JSON for AI-assisted automations and dashboards."
-version: "1.0.5"
+version: "1.0.6"
 slug: "ai_inventory_exporter"
 init: false
 arch:
